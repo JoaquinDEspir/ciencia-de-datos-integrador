@@ -1,0 +1,97 @@
+{
+  "generated_at_utc": "2025-10-08T13:24:26.715389Z",
+  "source": {
+    "mode": "remote_url",
+    "value": "inmoup_parallel_consolidated",
+    "tipos": [
+      "casas",
+      "terrenos",
+      "departamentos"
+    ],
+    "pages_per_tipo": {
+      "casas": 6,
+      "terrenos": 17,
+      "departamentos": 5
+    },
+    "received_per_tipo": {
+      "casas": 3037,
+      "terrenos": 6469,
+      "departamentos": 2362
+    }
+  },
+  "raw_sha256": "4f7a09befaa65721100238375132575e255bb909539572f4af998b2757d6598b",
+  "csv_path": "/usr/local/airflow/include/data/processed/propiedades_clean.csv",
+  "parquet_path": "/usr/local/airflow/include/data/processed/propiedades_clean.parquet",
+  "csv_sha256": "5aef9136d6a807cc30f07042adf772ca795422c20cb04894169e4a2e9bf28fd9",
+  "row_count": 6822,
+  "columns": [
+    "propiedad_id",
+    "tip_desc",
+    "prp_dom",
+    "loc_desc",
+    "pro_desc",
+    "con_desc",
+    "grupo_tip_desc",
+    "prp_pre_dol",
+    "prp_pre",
+    "banos",
+    "dormitorios",
+    "cochera",
+    "sup_total",
+    "sup_cubierta",
+    "prp_alta",
+    "prp_mod",
+    "url_ficha_inmoup",
+    "prp_lat",
+    "prp_lng",
+    "fotos_cantidad",
+    "cocheras"
+  ],
+  "stats": {
+    "rows_after_transform": 6469,
+    "columns": [
+      "propiedad_id",
+      "tip_desc",
+      "prp_dom",
+      "loc_desc",
+      "pro_desc",
+      "con_desc",
+      "grupo_tip_desc",
+      "prp_pre_dol",
+      "prp_pre",
+      "banos",
+      "dormitorios",
+      "cocheras",
+      "cochera",
+      "sup_total",
+      "sup_cubierta",
+      "prp_alta",
+      "prp_mod",
+      "url_ficha_inmoup",
+      "prp_lat",
+      "prp_lng",
+      "fotos_cantidad"
+    ]
+  },
+  "max_items": 0,
+  "received_count": 6469,
+  "validated_count": 6469,
+  "stopped_by_limit": false,
+  "pages_fetched_total": 28,
+  "pages_per_tipo": {
+    "casas": 6,
+    "terrenos": 17,
+    "departamentos": 5
+  },
+  "received_per_tipo": {
+    "casas": 3037,
+    "terrenos": 6469,
+    "departamentos": 2362
+  },
+  "upsert": {
+    "inserted": 3319,
+    "updated": 3150,
+    "existing_before": 3503,
+    "existing_after": 6822
+  }
+}

@@ -1,0 +1,7 @@
+services:
+  webserver:
+    ports:
+      - "8088:8081"   # host:container (Airflow web)
+  postgres:
+    ports:
+      - "5435:5432"   # por si 5432 también molesta

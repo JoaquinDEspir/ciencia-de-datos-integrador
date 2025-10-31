@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Propiedad (registro individual)",
+  "type": "object",
+  "required": ["propiedad_id"],
+  "properties": {
+    "propiedad_id": { "type": ["integer", "string"] },
+    "usuario_id":   { "type": ["integer", "string", "null"] },
+    "tip_desc":     { "type": ["string", "null"] },
+    "con_desc":     { "type": ["string", "null"] },
+    "nombre":       { "type": ["string", "null"] },
+    "loc_desc":     { "type": ["string", "null"] },
+    "pro_desc":     { "type": ["string", "null"] },
+    "prp_dom":      { "type": ["string", "null"] },
+    "prp_pre":      { "type": ["number", "string", "null"] },
+    "prp_pre_dol":  { "type": ["number", "string", "null"] },
+    "prp_ocultar_precio": { "type": ["integer", "number", "string", "null"] },
+    "prp_lat":      { "type": ["string", "number", "null"] },
+    "prp_lng":      { "type": ["string", "number", "null"] },
+    "prp_alta":     { "type": ["string", "null"] },
+    "prp_mod":      { "type": ["string", "null"] },
+    "dormitorios":  { "type": ["string", "number", "null"] },
+    "banos":        { "type": ["string", "number", "null"] },
+    "cochera":      { "type": ["integer", "number", "boolean", "string", "null"] },
+    "sup_total":    { "type": ["number", "string", "null"] },
+    "sup_cubierta": { "type": ["number", "string", "null"] },
+    "url_ficha_inmoup": { "type": ["string", "null"] },
+    "prp_desc":     { "type": ["string", "null"] },
+    "fotos":        { "type": ["array", "null"] }
+  },
+  "additionalProperties": true
+}
