@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 import pandas as pd
 
@@ -43,6 +43,23 @@ def _require_altair() -> None:
             "las visualizaciones interactivas."
         )
         raise RuntimeError(message) from _ALT_IMPORT_ERROR
+
+
+def _build_operation_param(
+    operations: List[str], *, label: str, name: str
+):  # pragma: no cover - thin wrapper.
+    """Create a drop-down parameter that defaults to mostrar todas las operaciones."""
+    options = ["Todas"] + operations if operations else ["Todas"]
+    return alt.param(
+        name=name,
+        value="Todas",
+        bind=alt.binding_select(options=options, name=label),
+    )
+
+
+def _series_mode(series: pd.Series) -> str | None:
+    mode = series.mode(dropna=True)
+    return None if mode.empty else mode.iat[0]
 
 
 def load_properties_data(csv_path: Path = DATA_PATH) -> PreparedData:
@@ -107,17 +124,20 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
     )
 
     operations = sorted(df["operacion"].dropna().unique().tolist())
-    selection_config = {
-        "fields": ["operacion"],
-        "bind": alt.binding_select(options=operations, name="Operacion: "),
-        "toggle": False,
-    }
-    if operations:
-        selection_config["value"] = [{"operacion": operations[0]}]
-    operation_selection = alt.selection_point(**selection_config)
+    operation_param = _build_operation_param(
+        operations, label="Operacion:", name="operacion_box"
+    )
 
-    base = alt.Chart(df).properties(
-        title="Distribucion de precios listados (USD) por tipo de propiedad"
+    base = (
+        alt.Chart(df)
+        .add_params(operation_param)
+        .transform_filter(
+            (operation_param == "Todas")
+            | (alt.datum.operacion == operation_param)
+        )
+        .properties(
+            title="Distribucion de precios listados (USD) por tipo de propiedad"
+        )
     )
 
     box = (
@@ -136,7 +156,6 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
             ),
             color=alt.Color("tipo_propiedad:N", legend=None),
         )
-        .transform_filter(operation_selection)
     )
 
     points = (
@@ -155,12 +174,9 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
                 ),
             ],
         )
-        .transform_filter(operation_selection)
     )
 
-    return (box + points).add_selection(operation_selection).properties(
-        width=700, height=400
-    )
+    return (box + points).properties(width=700, height=400)
 
 
 def price_vs_surface_chart(data: PreparedData) -> alt.Chart:
@@ -173,31 +189,47 @@ def price_vs_surface_chart(data: PreparedData) -> alt.Chart:
             "No hay registros con superficie total valida para la visualizacion."
         )
 
+    operations = sorted(df["operacion"].dropna().unique().tolist())
+    operation_param = _build_operation_param(
+        operations, label="Operacion:", name="operacion_surface"
+    )
+
     type_legend_selection = alt.selection_multi(
         fields=["tipo_propiedad"], bind="legend"
     )
 
     chart = (
         alt.Chart(df)
-        .mark_circle(stroke="#333", strokeWidth=0.4, opacity=0.7)
+        .add_params(operation_param)
+        .add_selection(type_legend_selection)
+        .transform_filter(
+            (operation_param == "Todas")
+            | (alt.datum.operacion == operation_param)
+        )
+        .transform_filter(type_legend_selection)
+        .mark_circle(stroke="#212121", strokeWidth=0.4, opacity=0.65)
         .encode(
             x=alt.X(
                 "superficie_total:Q",
                 title="Superficie total (m2)",
                 scale=alt.Scale(type="log"),
+                axis=alt.Axis(format="~s", tickCount=6),
             ),
             y=alt.Y(
                 "precio_usd:Q",
                 title="Precio listado (USD)",
                 scale=alt.Scale(type="log"),
+                axis=alt.Axis(format="~s", tickCount=6),
             ),
             color=alt.Color(
-                "tipo_propiedad:N", legend=alt.Legend(title="Tipo de propiedad")
+                "tipo_propiedad:N",
+                legend=alt.Legend(title="Tipo de propiedad"),
+                scale=alt.Scale(scheme="tableau20"),
             ),
             size=alt.Size(
                 "dormitorios:Q",
                 title="Dormitorios",
-                scale=alt.Scale(range=[20, 400]),
+                scale=alt.Scale(type="sqrt", range=[25, 320]),
             ),
             tooltip=[
                 alt.Tooltip("tip_desc:N", title="Tipo"),
@@ -211,8 +243,6 @@ def price_vs_surface_chart(data: PreparedData) -> alt.Chart:
                 alt.Tooltip("banos:Q", title="Banos"),
             ],
         )
-        .add_selection(type_legend_selection)
-        .transform_filter(type_legend_selection)
         .properties(
             title="Relacion entre metros totales y precio listado",
             width=700,
@@ -238,6 +268,44 @@ def price_density_map(data: PreparedData) -> alt.Chart:
     if df.empty:
         raise ValueError("No hay registros dentro del recorte geografico definido.")
 
+    map_base = df.copy()
+    map_base["lat_cell"] = map_base["prp_lat"].round(3)
+    map_base["lng_cell"] = map_base["prp_lng"].round(3)
+
+    aggregated = (
+        map_base.groupby(["lat_cell", "lng_cell", "operacion"], as_index=False)
+        .agg(
+            median_price=("precio_usd", "median"),
+            mean_price=("precio_usd", "mean"),
+            max_price=("precio_usd", "max"),
+            listings=("precio_usd", "size"),
+            median_surface=("superficie_total", "median"),
+        )
+        .rename(columns={"lat_cell": "lat", "lng_cell": "lng"})
+    )
+
+    modal_info = (
+        map_base.groupby(["lat_cell", "lng_cell", "operacion"])
+        .agg(
+            tipo_predominante=("tipo_propiedad", _series_mode),
+            loc_predominante=("loc_desc", _series_mode),
+        )
+        .reset_index()
+        .rename(columns={"lat_cell": "lat", "lng_cell": "lng"})
+    )
+
+    map_df = aggregated.merge(modal_info, on=["lat", "lng", "operacion"], how="left")
+    map_df = map_df[map_df["median_price"].notna() & (map_df["median_price"] > 0)]
+    if map_df.empty:
+        raise ValueError(
+            "No hay registros suficientes para construir el mapa de precios agrupado."
+        )
+
+    operations = sorted(map_df["operacion"].dropna().unique().tolist())
+    operation_param = _build_operation_param(
+        operations, label="Operacion:", name="operacion_mapa"
+    )
+
     background = (
         alt.Chart(alt.topo_feature(COUNTRIES_TOPOJSON_URL, "countries"))
         .transform_filter(f"datum.id == '{ARGENTINA_ISO_NUMERIC}'")
@@ -245,35 +313,40 @@ def price_density_map(data: PreparedData) -> alt.Chart:
         .project(type="mercator", scale=2000, center=[-68.85, -32.89])
     )
 
-    legend_selection = alt.selection_multi(fields=["tipo_propiedad"], bind="legend")
-
     points = (
-        alt.Chart(df)
-        .mark_circle(opacity=0.75, stroke="#424242", strokeWidth=0.3)
+        alt.Chart(map_df)
+        .add_params(operation_param)
+        .transform_filter(
+            (operation_param == "Todas")
+            | (alt.datum.operacion == operation_param)
+        )
+        .mark_circle(opacity=0.85, stroke="#1a1a1a", strokeWidth=0.35)
         .encode(
-            longitude=alt.Longitude("prp_lng:Q"),
-            latitude=alt.Latitude("prp_lat:Q"),
+            longitude=alt.Longitude("lng:Q"),
+            latitude=alt.Latitude("lat:Q"),
             size=alt.Size(
-                "precio_usd:Q",
-                title="Precio listado (USD)",
-                scale=alt.Scale(type="log", range=[20, 600]),
+                "listings:Q",
+                title="Cantidad de avisos",
+                scale=alt.Scale(type="sqrt", range=[25, 550]),
             ),
             color=alt.Color(
-                "tipo_propiedad:N", legend=alt.Legend(title="Tipo de propiedad")
+                "median_price:Q",
+                title="Mediana precio (USD)",
+                scale=alt.Scale(type="log", scheme="viridis"),
             ),
             tooltip=[
-                alt.Tooltip("tip_desc:N", title="Tipo"),
                 alt.Tooltip("operacion:N", title="Operacion"),
-                alt.Tooltip("loc_desc:N", title="Localidad"),
-                alt.Tooltip("precio_usd:Q", title="Precio USD", format=",.0f"),
+                alt.Tooltip("tipo_predominante:N", title="Tipo predominante"),
+                alt.Tooltip("listings:Q", title="Cantidad de avisos"),
+                alt.Tooltip("median_price:Q", title="Mediana precio USD", format=",.0f"),
+                alt.Tooltip("mean_price:Q", title="Precio promedio USD", format=",.0f"),
+                alt.Tooltip("max_price:Q", title="Maximo USD", format=",.0f"),
+                alt.Tooltip("loc_predominante:N", title="Localidad predominante"),
                 alt.Tooltip(
-                    "superficie_total:Q", title="Sup. total (m2)", format=",.0f"
+                    "median_surface:Q", title="Mediana sup. total (m2)", format=",.0f"
                 ),
-                alt.Tooltip("cocheras_total:Q", title="Cocheras"),
             ],
         )
-        .add_selection(legend_selection)
-        .transform_filter(legend_selection)
     )
 
     return (
@@ -283,7 +356,7 @@ def price_density_map(data: PreparedData) -> alt.Chart:
             width=700,
             height=500,
         )
-        .resolve_scale(size="independent")
+        .resolve_scale(size="independent", color="independent")
     )
 
 
