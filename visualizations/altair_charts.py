@@ -107,11 +107,13 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
     )
 
     operations = sorted(df["operacion"].dropna().unique().tolist())
-    operation_selection = alt.selection_single(
-        fields=["operacion"],
-        bind=alt.binding_select(options=operations, name="Operacion: "),
-        init={"operacion": operations[0] if operations else None},
-    )
+    selection_config = {
+        "fields": ["operacion"],
+        "bind": alt.binding_select(options=operations, name="Operacion: "),
+    }
+    if operations:
+        selection_config["value"] = {"operacion": operations[0]}
+    operation_selection = alt.selection_single(**selection_config)
 
     base = alt.Chart(df).properties(
         title="Distribucion de precios listados (USD) por tipo de propiedad"
