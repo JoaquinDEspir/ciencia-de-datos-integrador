@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List
 
+import numpy as np
 import pandas as pd
 
 try:
@@ -20,11 +23,14 @@ else:  # pragma: no cover - simple configuration hook.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = PROJECT_ROOT / "include" / "data" / "processed" / "propiedades_clean.csv"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "visualizations" / "charts"
-
-COUNTRIES_TOPOJSON_URL = (
-    "https://raw.githubusercontent.com/vega/vega-datasets/master/data/world-110m.json"
+MENDOZA_BOUNDARY_PATH = (
+    PROJECT_ROOT / "include" / "data" / "geo" / "mendoza_boundary.geojson"
 )
-ARGENTINA_ISO_NUMERIC = "032"
+
+BOXPLOT_PRICE_DOMAIN = (10_000, 1_000_000)
+MAP_BIN_STEP_DEGREES = 0.01
+MAP_PRICE_DOMAIN = (10_000, 1_000_000)
+MIN_LISTINGS_PER_CELL = 2
 
 
 @dataclass(frozen=True)
@@ -48,7 +54,7 @@ def _require_altair() -> None:
 def _build_operation_param(
     operations: List[str], *, label: str, name: str
 ):  # pragma: no cover - thin wrapper.
-    """Create a drop-down parameter that defaults to mostrar todas las operaciones."""
+    """Create a drop-down parameter that defaults a mostrar todas las operaciones."""
     options = ["Todas"] + operations if operations else ["Todas"]
     return alt.param(
         name=name,
@@ -60,6 +66,24 @@ def _build_operation_param(
 def _series_mode(series: pd.Series) -> str | None:
     mode = series.mode(dropna=True)
     return None if mode.empty else mode.iat[0]
+
+
+@lru_cache(maxsize=1)
+def _mendoza_boundary() -> Dict[str, object]:
+    """Load boundary polygon for Mendoza province as a FeatureCollection."""
+    if not MENDOZA_BOUNDARY_PATH.exists():
+        raise RuntimeError(
+            "No se encuentra el poligono de Mendoza. Ejecuta el script de descarga."
+        )
+    geometry = json.loads(MENDOZA_BOUNDARY_PATH.read_text(encoding="utf-8"))
+    if geometry.get("type") != "FeatureCollection":
+        geometry = {
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "properties": {}, "geometry": geometry}
+            ],
+        }
+    return geometry
 
 
 def load_properties_data(csv_path: Path = DATA_PATH) -> PreparedData:
@@ -115,21 +139,25 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
         raise ValueError("No hay registros con precio en USD para la visualizacion.")
 
     df = df[df["tipo_propiedad"].notna()]
+    floor, ceiling = BOXPLOT_PRICE_DOMAIN
+    trimmed = df[df["precio_usd"].between(floor, ceiling)]
+    if trimmed.empty:
+        trimmed = df[df["precio_usd"].notna()]
 
     type_order = (
-        df.groupby("tipo_propiedad")["precio_usd"]
+        trimmed.groupby("tipo_propiedad")["precio_usd"]
         .median()
         .sort_values(ascending=False)
         .index.tolist()
     )
 
-    operations = sorted(df["operacion"].dropna().unique().tolist())
+    operations = sorted(trimmed["operacion"].dropna().unique().tolist())
     operation_param = _build_operation_param(
         operations, label="Operacion:", name="operacion_box"
     )
 
     base = (
-        alt.Chart(df)
+        alt.Chart(trimmed)
         .add_params(operation_param)
         .transform_filter(
             (operation_param == "Todas")
@@ -152,7 +180,9 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
             y=alt.Y(
                 "precio_usd:Q",
                 title="Precio listado (USD)",
-                scale=alt.Scale(type="log"),
+                scale=alt.Scale(
+                    type="log", domain=BOXPLOT_PRICE_DOMAIN, clamp=True
+                ),
             ),
             color=alt.Color("tipo_propiedad:N", legend=None),
         )
@@ -162,7 +192,12 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
         base.mark_circle(size=40, opacity=0.35)
         .encode(
             x=alt.X("tipo_propiedad:N", sort=type_order),
-            y=alt.Y("precio_usd:Q", scale=alt.Scale(type="log")),
+            y=alt.Y(
+                "precio_usd:Q",
+                scale=alt.Scale(
+                    type="log", domain=BOXPLOT_PRICE_DOMAIN, clamp=True
+                ),
+            ),
             color=alt.Color("tipo_propiedad:N", legend=None),
             tooltip=[
                 alt.Tooltip("tip_desc:N", title="Tipo"),
@@ -268,95 +303,143 @@ def price_density_map(data: PreparedData) -> alt.Chart:
     if df.empty:
         raise ValueError("No hay registros dentro del recorte geografico definido.")
 
-    map_base = df.copy()
-    map_base["lat_cell"] = map_base["prp_lat"].round(3)
-    map_base["lng_cell"] = map_base["prp_lng"].round(3)
-
-    aggregated = (
-        map_base.groupby(["lat_cell", "lng_cell", "operacion"], as_index=False)
+    bin_step = MAP_BIN_STEP_DEGREES
+    df["lng_bin"] = np.floor(df["prp_lng"] / bin_step) * bin_step
+    df["lat_bin"] = np.floor(df["prp_lat"] / bin_step) * bin_step
+    grouped = (
+        df.groupby(["operacion", "lng_bin", "lat_bin"], as_index=False)
         .agg(
             median_price=("precio_usd", "median"),
             mean_price=("precio_usd", "mean"),
             max_price=("precio_usd", "max"),
             listings=("precio_usd", "size"),
             median_surface=("superficie_total", "median"),
-        )
-        .rename(columns={"lat_cell": "lat", "lng_cell": "lng"})
-    )
-
-    modal_info = (
-        map_base.groupby(["lat_cell", "lng_cell", "operacion"])
-        .agg(
             tipo_predominante=("tipo_propiedad", _series_mode),
             loc_predominante=("loc_desc", _series_mode),
         )
-        .reset_index()
-        .rename(columns={"lat_cell": "lat", "lng_cell": "lng"})
+        .dropna(subset=["median_price"])
     )
-
-    map_df = aggregated.merge(modal_info, on=["lat", "lng", "operacion"], how="left")
-    map_df = map_df[map_df["median_price"].notna() & (map_df["median_price"] > 0)]
-    if map_df.empty:
+    grouped = grouped[grouped["median_price"] > 0]
+    grouped = grouped[grouped["listings"] >= MIN_LISTINGS_PER_CELL]
+    if grouped.empty:
         raise ValueError(
             "No hay registros suficientes para construir el mapa de precios agrupado."
         )
 
-    operations = sorted(map_df["operacion"].dropna().unique().tolist())
+    grouped["lng_bin_end"] = grouped["lng_bin"] + bin_step
+    grouped["lat_bin_end"] = grouped["lat_bin"] + bin_step
+
+    features = []
+    for row in grouped.itertuples():
+        geometry = {
+            "type": "Polygon",
+            "coordinates": [
+                [
+                    [row.lng_bin, row.lat_bin],
+                    [row.lng_bin_end, row.lat_bin],
+                    [row.lng_bin_end, row.lat_bin_end],
+                    [row.lng_bin, row.lat_bin_end],
+                    [row.lng_bin, row.lat_bin],
+                ]
+            ],
+        }
+        properties = {
+            "operacion": row.operacion,
+            "median_price": float(row.median_price) if pd.notna(row.median_price) else None,
+            "mean_price": float(row.mean_price) if pd.notna(row.mean_price) else None,
+            "max_price": float(row.max_price) if pd.notna(row.max_price) else None,
+            "listings": int(row.listings),
+            "median_surface": float(row.median_surface)
+            if pd.notna(row.median_surface)
+            else None,
+            "tipo_predominante": row.tipo_predominante,
+            "loc_predominante": row.loc_predominante,
+        }
+        features.append(
+            {"type": "Feature", "properties": properties, "geometry": geometry}
+        )
+
+    if not features:
+        raise ValueError(
+            "No hay celdas suficientes para visualizar la concentracion de precios."
+        )
+
+    feature_collection = {"type": "FeatureCollection", "features": features}
+
+    operations = sorted(
+        {
+            feature["properties"]["operacion"]
+            for feature in features
+            if feature["properties"]["operacion"]
+        }
+    )
     operation_param = _build_operation_param(
         operations, label="Operacion:", name="operacion_mapa"
     )
 
-    background = (
-        alt.Chart(alt.topo_feature(COUNTRIES_TOPOJSON_URL, "countries"))
-        .transform_filter(f"datum.id == '{ARGENTINA_ISO_NUMERIC}'")
-        .mark_geoshape(fill="#f5f5f5", stroke="#bdbdbd")
-        .project(type="mercator", scale=2000, center=[-68.85, -32.89])
+    boundary_geo = _mendoza_boundary()
+    projection = alt.Projection(type="mercator", fit=boundary_geo["features"])
+
+    boundary = (
+        alt.Chart(boundary_geo)
+        .mark_geoshape(fill="#0f172a", stroke="#60708d", strokeWidth=0.7)
+        .project(projection)
     )
 
-    points = (
-        alt.Chart(map_df)
+    heatmap = (
+        alt.Chart(feature_collection)
         .add_params(operation_param)
         .transform_filter(
             (operation_param == "Todas")
-            | (alt.datum.operacion == operation_param)
+            | (alt.datum.properties.operacion == operation_param)
         )
-        .mark_circle(opacity=0.85, stroke="#1a1a1a", strokeWidth=0.35)
+        .mark_geoshape(stroke="#0b1120", strokeWidth=0.15)
         .encode(
-            longitude=alt.Longitude("lng:Q"),
-            latitude=alt.Latitude("lat:Q"),
-            size=alt.Size(
-                "listings:Q",
-                title="Cantidad de avisos",
-                scale=alt.Scale(type="sqrt", range=[25, 550]),
-            ),
             color=alt.Color(
-                "median_price:Q",
+                "properties.median_price:Q",
                 title="Mediana precio (USD)",
-                scale=alt.Scale(type="log", scheme="viridis"),
+                scale=alt.Scale(
+                    type="log",
+                    domain=list(MAP_PRICE_DOMAIN),
+                    clamp=True,
+                    scheme="viridis",
+                ),
             ),
             tooltip=[
-                alt.Tooltip("operacion:N", title="Operacion"),
-                alt.Tooltip("tipo_predominante:N", title="Tipo predominante"),
-                alt.Tooltip("listings:Q", title="Cantidad de avisos"),
-                alt.Tooltip("median_price:Q", title="Mediana precio USD", format=",.0f"),
-                alt.Tooltip("mean_price:Q", title="Precio promedio USD", format=",.0f"),
-                alt.Tooltip("max_price:Q", title="Maximo USD", format=",.0f"),
-                alt.Tooltip("loc_predominante:N", title="Localidad predominante"),
+                alt.Tooltip("properties.operacion:N", title="Operacion"),
+                alt.Tooltip("properties.tipo_predominante:N", title="Tipo predominante"),
+                alt.Tooltip("properties.loc_predominante:N", title="Localidad predominante"),
+                alt.Tooltip("properties.listings:Q", title="Cantidad de avisos"),
                 alt.Tooltip(
-                    "median_surface:Q", title="Mediana sup. total (m2)", format=",.0f"
+                    "properties.median_price:Q",
+                    title="Mediana precio USD",
+                    format=",.0f",
+                ),
+                alt.Tooltip(
+                    "properties.mean_price:Q",
+                    title="Precio promedio USD",
+                    format=",.0f",
+                ),
+                alt.Tooltip(
+                    "properties.max_price:Q",
+                    title="Maximo USD",
+                    format=",.0f",
+                ),
+                alt.Tooltip(
+                    "properties.median_surface:Q",
+                    title="Mediana sup. total (m2)",
+                    format=",.0f",
                 ),
             ],
         )
+        .project(projection)
+        .properties(width=700, height=500)
     )
 
     return (
-        (background + points)
-        .properties(
-            title="Concentracion de precio listado (USD) en el Gran Mendoza",
-            width=700,
-            height=500,
-        )
-        .resolve_scale(size="independent", color="independent")
+        (boundary + heatmap)
+        .properties(title="Concentracion de precio listado (USD) en el Gran Mendoza")
+        .resolve_scale(color="independent")
     )
 
 
