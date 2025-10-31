@@ -364,8 +364,6 @@ def price_density_map(data: PreparedData) -> alt.Chart:
             "No hay celdas suficientes para visualizar la concentracion de precios."
         )
 
-    feature_collection = {"type": "FeatureCollection", "features": features}
-
     operations = sorted(
         {
             feature["properties"]["operacion"]
@@ -378,20 +376,22 @@ def price_density_map(data: PreparedData) -> alt.Chart:
     )
 
     boundary_geo = _mendoza_boundary()
-    projection = alt.Projection(type="mercator", fit=boundary_geo["features"])
+
+    boundary_data = alt.Data(values=boundary_geo["features"])
+    heatmap_data = alt.Data(values=features)
 
     boundary = (
-        alt.Chart(boundary_geo)
+        alt.Chart(boundary_data)
         .mark_geoshape(fill="#0f172a", stroke="#60708d", strokeWidth=0.7)
-        .project(projection)
+        .project(type="mercator", fit=boundary_geo)
     )
 
     heatmap = (
-        alt.Chart(feature_collection)
+        alt.Chart(heatmap_data)
         .add_params(operation_param)
         .transform_filter(
             (operation_param == "Todas")
-            | (alt.datum.properties.operacion == operation_param)
+            | (alt.datum["properties"]["operacion"] == operation_param)
         )
         .mark_geoshape(stroke="#0b1120", strokeWidth=0.15)
         .encode(
@@ -432,7 +432,7 @@ def price_density_map(data: PreparedData) -> alt.Chart:
                 ),
             ],
         )
-        .project(projection)
+        .project(type="mercator", fit=boundary_geo)
         .properties(width=700, height=500)
     )
 
