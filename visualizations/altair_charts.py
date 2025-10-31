@@ -110,10 +110,11 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
     selection_config = {
         "fields": ["operacion"],
         "bind": alt.binding_select(options=operations, name="Operacion: "),
+        "toggle": False,
     }
     if operations:
-        selection_config["value"] = {"operacion": operations[0]}
-    operation_selection = alt.selection_single(**selection_config)
+        selection_config["value"] = [{"operacion": operations[0]}]
+    operation_selection = alt.selection_point(**selection_config)
 
     base = alt.Chart(df).properties(
         title="Distribucion de precios listados (USD) por tipo de propiedad"
