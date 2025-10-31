@@ -10,8 +10,6 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point, shape, box
-from shapely.geometry.base import BaseGeometry
 
 try:
     import altair as alt
@@ -88,11 +86,52 @@ def _mendoza_boundary() -> Dict[str, object]:
     return geometry
 
 
-@lru_cache(maxsize=1)
-def _mendoza_shapes() -> List[BaseGeometry]:
-    """Return shapely geometries that conform the Mendoza boundary."""
-    features = _mendoza_boundary()["features"]
-    return [shape(feature["geometry"]) for feature in features]
+def _ring_contains_point(lon: float, lat: float, ring: List[List[float]]) -> bool:
+    """Ray-casting algorithm to determine if a point is inside a linear ring."""
+    inside = False
+    if len(ring) < 3:
+        return False
+    points = ring[:-1] if ring[0] == ring[-1] else ring
+    if len(points) < 3:
+        return False
+    for i in range(len(points)):
+        x1, y1 = points[i]
+        x2, y2 = points[(i + 1) % len(points)]
+        intersects = ((y1 > lat) != (y2 > lat)) and (
+            lon
+            < (x2 - x1) * (lat - y1) / (y2 - y1 + 1e-12)  # avoid division by zero
+            + x1
+        )
+        if intersects:
+            inside = not inside
+    return inside
+
+
+def _polygon_contains_point(
+    lon: float, lat: float, coordinates: List[List[List[float]]]
+) -> bool:
+    """Return True if point is inside polygon defined by coordinates."""
+    if not coordinates:
+        return False
+    if not _ring_contains_point(lon, lat, coordinates[0]):
+        return False
+    for hole in coordinates[1:]:
+        if _ring_contains_point(lon, lat, hole):
+            return False
+    return True
+
+
+def _geometry_contains_point(lon: float, lat: float, geometry: Dict[str, object]) -> bool:
+    """Evaluate whether a point is inside (Multi)Polygon geometry."""
+    gtype = geometry.get("type")
+    if gtype == "Polygon":
+        return _polygon_contains_point(lon, lat, geometry.get("coordinates", []))
+    if gtype == "MultiPolygon":
+        for polygon in geometry.get("coordinates", []):
+            if _polygon_contains_point(lon, lat, polygon):
+                return True
+        return False
+    return False
 
 
 def load_properties_data(csv_path: Path = DATA_PATH) -> PreparedData:
@@ -338,12 +377,17 @@ def price_density_map(data: PreparedData) -> alt.Chart:
     grouped["lng_bin_end"] = grouped["lng_bin"] + bin_step
     grouped["lat_bin_end"] = grouped["lat_bin"] + bin_step
 
-    boundary_shapes = _mendoza_shapes()
+    boundary_geo = _mendoza_boundary()
+    boundary_features = boundary_geo["features"]
 
     features = []
     for row in grouped.itertuples():
-        cell_polygon = box(row.lng_bin, row.lat_bin, row.lng_bin_end, row.lat_bin_end)
-        if not any(shape_.intersects(cell_polygon) for shape_ in boundary_shapes):
+        lon_center = (row.lng_bin + row.lng_bin_end) / 2
+        lat_center = (row.lat_bin + row.lat_bin_end) / 2
+        if not any(
+            _geometry_contains_point(lon_center, lat_center, feature["geometry"])
+            for feature in boundary_features
+        ):
             continue
         geometry = {
             "type": "Polygon",
@@ -388,8 +432,6 @@ def price_density_map(data: PreparedData) -> alt.Chart:
     operation_param = _build_operation_param(
         operations, label="Operacion:", name="operacion_mapa"
     )
-
-    boundary_geo = _mendoza_boundary()
 
     boundary_data = alt.Data(values=boundary_geo["features"])
     heatmap_data = alt.Data(values=features)
