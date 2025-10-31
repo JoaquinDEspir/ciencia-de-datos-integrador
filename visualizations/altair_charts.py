@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -336,9 +336,15 @@ def price_vs_surface_chart(data: PreparedData) -> alt.Chart:
     return chart
 
 
-def price_density_map(data: PreparedData) -> alt.Chart:
-    """Map of Mendoza showing price intensity by latitude and longitude."""
-    _require_altair()
+def _prepare_price_density(
+    data: PreparedData,
+) -> Tuple[
+    List[Dict[str, object]],
+    List[float],
+    int,
+    Dict[str, object],
+    List[str],
+]:
     df = data.with_geo.copy()
     if df.empty:
         raise ValueError(
@@ -429,12 +435,6 @@ def price_density_map(data: PreparedData) -> alt.Chart:
             if feature["properties"]["operacion"]
         }
     )
-    operation_param = _build_operation_param(
-        operations, label="Operacion:", name="operacion_mapa"
-    )
-
-    boundary_data = alt.Data(values=boundary_geo["features"])
-    heatmap_data = alt.Data(values=features)
 
     price_values = [
         feature["properties"]["median_price"]
@@ -456,6 +456,27 @@ def price_density_map(data: PreparedData) -> alt.Chart:
         if feature["properties"]["listings"] is not None
     ]
     max_listings = max(listings_values) if listings_values else MIN_LISTINGS_PER_CELL
+
+    return features, price_domain, max_listings, boundary_geo, operations
+
+
+def price_density_map(data: PreparedData) -> alt.Chart:
+    """Map of Mendoza showing price intensity by latitude and longitude."""
+    _require_altair()
+    (
+        features,
+        price_domain,
+        max_listings,
+        boundary_geo,
+        operations,
+    ) = _prepare_price_density(data)
+
+    operation_param = _build_operation_param(
+        operations, label="Operacion:", name="operacion_mapa"
+    )
+
+    boundary_data = alt.Data(values=boundary_geo["features"])
+    heatmap_data = alt.Data(values=features)
 
     boundary = (
         alt.Chart(boundary_data)
@@ -527,6 +548,21 @@ def price_density_map(data: PreparedData) -> alt.Chart:
         .properties(title="Concentracion de precio listado (USD) en el Gran Mendoza")
         .resolve_scale(color="independent")
     )
+
+
+def price_density_geojson(
+    data: PreparedData,
+) -> Tuple[Dict[str, object], List[float], int, Dict[str, object], List[str]]:
+    """Return the aggregated GeoJSON used to render the price heatmap."""
+    (
+        features,
+        price_domain,
+        max_listings,
+        boundary_geo,
+        operations,
+    ) = _prepare_price_density(data)
+    feature_collection = {"type": "FeatureCollection", "features": features}
+    return feature_collection, price_domain, max_listings, boundary_geo, operations
 
 
 def save_charts(output_dir: Path = DEFAULT_OUTPUT_DIR) -> Dict[str, Path]:

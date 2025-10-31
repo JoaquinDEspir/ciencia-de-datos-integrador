@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Dict, List, Tuple
+
+import math
 
 import pandas as pd
 import streamlit as st
+from streamlit_folium import st_folium
 
 from app.model import ModelArtifacts, TARGET_COLUMN, train_price_model
 from visualizations.altair_charts import (
     PreparedData,
     load_properties_data,
-    price_density_map,
+    price_density_geojson,
     price_distribution_chart,
     price_vs_surface_chart,
 )
@@ -45,13 +48,120 @@ def build_filtered_data(
     return PreparedData(full=df, with_price_usd=with_price, with_geo=with_geo)
 
 
+def render_price_density_map(filtered: PreparedData) -> None:
+    from branca.colormap import LinearColormap
+    import folium
+
+    try:
+        feature_collection, price_domain, max_listings, _boundary, _ops = (
+            price_density_geojson(filtered)
+        )
+    except (RuntimeError, ValueError) as exc:
+        st.warning(str(exc))
+        return
+
+    features = feature_collection["features"]
+    if not features:
+        st.warning("Sin celdas suficientes para construir el mapa de calor.")
+        return
+
+    lons: List[float] = []
+    lats: List[float] = []
+    for feature in features:
+        coords = feature["geometry"]["coordinates"][0]
+        for lon, lat in coords:
+            lons.append(lon)
+            lats.append(lat)
+    center_lat = sum(lats) / len(lats)
+    center_lon = sum(lons) / len(lons)
+
+    base_map = folium.Map(
+        location=[center_lat, center_lon],
+        tiles="CartoDB positron",
+        zoom_start=11,
+        control_scale=True,
+    )
+
+    valid_prices = [
+        feature["properties"]["median_price"]
+        for feature in features
+        if feature["properties"].get("median_price")
+    ]
+    if not valid_prices:
+        st.warning("No hay precios suficientes para graficar el mapa.")
+        return
+
+    lower = max(min(valid_prices), price_domain[0])
+    upper = max(max(valid_prices), lower * 1.05)
+    log_min = math.log10(lower)
+    log_max = math.log10(upper)
+    colormap = LinearColormap(
+        colors=["#440154", "#31688e", "#35b779", "#fde725"],
+        vmin=log_min,
+        vmax=log_max,
+        caption="Mediana precio (USD) – escala log",
+    )
+
+    def style_function(feature: Dict[str, object]) -> Dict[str, object]:
+        properties = feature["properties"]
+        price = properties.get("median_price")
+        color = "#9e9e9e"
+        if isinstance(price, (int, float)) and price > 0:
+            color = colormap(math.log10(price))
+        listings = properties.get("listings") or 0
+        opacity = 0.25 + 0.7 * min(listings / max(max_listings, 1), 1.0)
+        return {
+            "fillColor": color,
+            "color": "#4b5563",
+            "weight": 0.4,
+            "fillOpacity": opacity,
+        }
+
+    tooltip = folium.GeoJsonTooltip(
+        fields=[
+            "operacion",
+            "tipo_predominante",
+            "loc_predominante",
+            "listings",
+            "median_price",
+            "mean_price",
+            "max_price",
+            "median_surface",
+        ],
+        aliases=[
+            "Operacion",
+            "Tipo predominante",
+            "Localidad predominante",
+            "Cantidad de avisos",
+            "Mediana precio USD",
+            "Precio promedio USD",
+            "Maximo USD",
+            "Mediana sup. total (m2)",
+        ],
+        localize=True,
+        sticky=False,
+        labels=True,
+    )
+
+    folium.GeoJson(
+        feature_collection,
+        name="Mediana precio (USD)",
+        style_function=style_function,
+        tooltip=tooltip,
+        highlight_function=lambda _: {"weight": 1.1, "color": "#111827"},
+    ).add_to(base_map)
+    colormap.add_to(base_map)
+
+    st_folium(base_map, width=900, height=520, returned_objects=[])
+
+
 def render_visualisations(filtered: PreparedData) -> None:
     try:
         st.altair_chart(price_distribution_chart(filtered), use_container_width=True)
         st.altair_chart(price_vs_surface_chart(filtered), use_container_width=True)
-        st.altair_chart(price_density_map(filtered), use_container_width=True)
     except (RuntimeError, ValueError) as exc:
         st.warning(str(exc))
+    render_price_density_map(filtered)
 
 
 def render_sidebar(artifacts: ModelArtifacts) -> Tuple[List[str], List[str]]:

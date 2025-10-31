@@ -4,3 +4,6 @@ requests==2.32.3
 altair==5.5.0
 numpy>=1.24.0
 streamlit>=1.32.0
+folium>=0.16.0
+streamlit-folium>=0.22.0
+branca>=0.7.0
