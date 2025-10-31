@@ -10,6 +10,8 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
+from shapely.geometry import Point, shape, box
+from shapely.geometry.base import BaseGeometry
 
 try:
     import altair as alt
@@ -84,6 +86,13 @@ def _mendoza_boundary() -> Dict[str, object]:
             ],
         }
     return geometry
+
+
+@lru_cache(maxsize=1)
+def _mendoza_shapes() -> List[BaseGeometry]:
+    """Return shapely geometries that conform the Mendoza boundary."""
+    features = _mendoza_boundary()["features"]
+    return [shape(feature["geometry"]) for feature in features]
 
 
 def load_properties_data(csv_path: Path = DATA_PATH) -> PreparedData:
@@ -329,8 +338,13 @@ def price_density_map(data: PreparedData) -> alt.Chart:
     grouped["lng_bin_end"] = grouped["lng_bin"] + bin_step
     grouped["lat_bin_end"] = grouped["lat_bin"] + bin_step
 
+    boundary_shapes = _mendoza_shapes()
+
     features = []
     for row in grouped.itertuples():
+        cell_polygon = box(row.lng_bin, row.lat_bin, row.lng_bin_end, row.lat_bin_end)
+        if not any(shape_.intersects(cell_polygon) for shape_ in boundary_shapes):
+            continue
         geometry = {
             "type": "Polygon",
             "coordinates": [
@@ -380,9 +394,30 @@ def price_density_map(data: PreparedData) -> alt.Chart:
     boundary_data = alt.Data(values=boundary_geo["features"])
     heatmap_data = alt.Data(values=features)
 
+    price_values = [
+        feature["properties"]["median_price"]
+        for feature in features
+        if feature["properties"]["median_price"] is not None
+    ]
+    if price_values:
+        lower = max(MAP_PRICE_DOMAIN[0], min(price_values))
+        upper = min(MAP_PRICE_DOMAIN[1], max(price_values))
+        if lower >= upper:
+            upper = max(lower * 1.1, lower + 1)
+        price_domain = [lower, upper]
+    else:
+        price_domain = list(MAP_PRICE_DOMAIN)
+
+    listings_values = [
+        feature["properties"]["listings"]
+        for feature in features
+        if feature["properties"]["listings"] is not None
+    ]
+    max_listings = max(listings_values) if listings_values else MIN_LISTINGS_PER_CELL
+
     boundary = (
         alt.Chart(boundary_data)
-        .mark_geoshape(fill="#0f172a", stroke="#60708d", strokeWidth=0.7)
+        .mark_geoshape(fill=None, stroke="#60708d", strokeWidth=0.8)
         .project(type="mercator", fit=boundary_geo)
     )
 
@@ -400,9 +435,18 @@ def price_density_map(data: PreparedData) -> alt.Chart:
                 title="Mediana precio (USD)",
                 scale=alt.Scale(
                     type="log",
-                    domain=list(MAP_PRICE_DOMAIN),
+                    domain=price_domain,
                     clamp=True,
                     scheme="viridis",
+                ),
+            ),
+            opacity=alt.Opacity(
+                "properties.listings:Q",
+                title="Cantidad de avisos",
+                scale=alt.Scale(
+                    domain=[MIN_LISTINGS_PER_CELL, max_listings],
+                    range=[0.35, 0.95],
+                    clamp=True,
                 ),
             ),
             tooltip=[
