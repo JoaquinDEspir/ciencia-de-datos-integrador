@@ -1,0 +1,189 @@
+﻿{
+  "Capital": [
+    "Capital - Microcentro",
+    "Capital - Primera Seccion",
+    "Capital - Segunda Seccion",
+    "Capital - Tercera Seccion",
+    "Capital - Cuarta Seccion",
+    "Capital - Quinta Seccion",
+    "Capital - Sexta Seccion",
+    "Capital - La Alameda",
+    "Capital - La Favorita",
+    "Capital - Parque Civit",
+    "Capital - Otros",
+    "Capital - Sin Coordenadas"
+  ],
+  "Godoy Cruz": [
+    "Godoy Cruz - Godoy Cruz Centro",
+    "Godoy Cruz - Villa Hipodromo",
+    "Godoy Cruz - Benegas",
+    "Godoy Cruz - Bombal",
+    "Godoy Cruz - Palmares",
+    "Godoy Cruz - Las Tortugas",
+    "Godoy Cruz - Trapiche",
+    "Godoy Cruz - San Vicente",
+    "Godoy Cruz - Otros",
+    "Godoy Cruz - Sin Coordenadas"
+  ],
+  "Guaymallen": [
+    "Guaymallen - Villa Nueva",
+    "Guaymallen - Dorrego",
+    "Guaymallen - Bermejo",
+    "Guaymallen - Rodeo de la Cruz",
+    "Guaymallen - Jesus Nazareno",
+    "Guaymallen - Colonia Segovia",
+    "Guaymallen - Los Corralitos",
+    "Guaymallen - El Sauce",
+    "Guaymallen - Otros",
+    "Guaymallen - Sin Coordenadas"
+  ],
+  "Maipu": [
+    "Maipu - Ciudad de Maipu",
+    "Maipu - Coquimbito",
+    "Maipu - Russell",
+    "Maipu - Fray Luis Beltran",
+    "Maipu - Luzuriaga",
+    "Maipu - Gutierrez",
+    "Maipu - San Roque",
+    "Maipu - Cruz de Piedra",
+    "Maipu - Otros",
+    "Maipu - Sin Coordenadas"
+  ],
+  "Lujan de Cuyo": [
+    "Lujan de Cuyo - Ciudad de Lujan",
+    "Lujan de Cuyo - Chacras de Coria",
+    "Lujan de Cuyo - Carrodilla",
+    "Lujan de Cuyo - Vistalba",
+    "Lujan de Cuyo - Agrelo",
+    "Lujan de Cuyo - Perdriel",
+    "Lujan de Cuyo - Ugarteche",
+    "Lujan de Cuyo - Potrerillos",
+    "Lujan de Cuyo - La Puntilla",
+    "Lujan de Cuyo - Otros",
+    "Lujan de Cuyo - Sin Coordenadas"
+  ],
+  "Las Heras": [
+    "Las Heras - Ciudad de Las Heras",
+    "Las Heras - El Algarrobal",
+    "Las Heras - El Borbollon",
+    "Las Heras - El Plumerillo",
+    "Las Heras - El Challao",
+    "Las Heras - Capdevila",
+    "Las Heras - Panquehua",
+    "Las Heras - El Zapallar",
+    "Las Heras - Otros",
+    "Las Heras - Sin Coordenadas"
+  ],
+  "San Rafael": [
+    "San Rafael - Ciudad",
+    "San Rafael - Cuadro Nacional",
+    "San Rafael - Las Paredes",
+    "San Rafael - Rama Caida",
+    "San Rafael - El Cerrito",
+    "San Rafael - Villa 25 de Mayo",
+    "San Rafael - Monte Coman",
+    "San Rafael - El Nihuil",
+    "San Rafael - Otros",
+    "San Rafael - Sin Coordenadas"
+  ],
+  "San Martin": [
+    "San Martin - Ciudad",
+    "San Martin - Palmira",
+    "San Martin - Chapanay",
+    "San Martin - Montecaseros",
+    "San Martin - Tres Porteñas",
+    "San Martin - Nueva California",
+    "San Martin - El Espino",
+    "San Martin - Buen Orden",
+    "San Martin - Otros",
+    "San Martin - Sin Coordenadas"
+  ],
+  "Tunuyan": [
+    "Tunuyan - Ciudad",
+    "Tunuyan - Vista Flores",
+    "Tunuyan - Colonia Las Rosas",
+    "Tunuyan - Los Sauces",
+    "Tunuyan - Villa Seca",
+    "Tunuyan - El Totoral",
+    "Tunuyan - Otros",
+    "Tunuyan - Sin Coordenadas"
+  ],
+  "Tupungato": [
+    "Tupungato - Ciudad",
+    "Tupungato - La Arboleda",
+    "Tupungato - Gualtallari",
+    "Tupungato - San Jose",
+    "Tupungato - Zapata",
+    "Tupungato - Otros",
+    "Tupungato - Sin Coordenadas"
+  ],
+  "General Alvear": [
+    "General Alvear - Ciudad",
+    "General Alvear - Bowen",
+    "General Alvear - Carmensa",
+    "General Alvear - Colonia Alvear Este",
+    "General Alvear - Otros",
+    "General Alvear - Sin Coordenadas"
+  ],
+  "Santa Rosa": [
+    "Santa Rosa - Ciudad",
+    "Santa Rosa - La Dormida",
+    "Santa Rosa - Las Catitas",
+    "Santa Rosa - 12 de Octubre",
+    "Santa Rosa - Otros",
+    "Santa Rosa - Sin Coordenadas"
+  ],
+  "Rivadavia": [
+    "Rivadavia - Ciudad",
+    "Rivadavia - Los Campamentos",
+    "Rivadavia - La Libertad",
+    "Rivadavia - Medrano",
+    "Rivadavia - Andrade",
+    "Rivadavia - Otros",
+    "Rivadavia - Sin Coordenadas"
+  ],
+  "San Carlos": [
+    "San Carlos - La Consulta",
+    "San Carlos - Eugenio Bustos",
+    "San Carlos - Chilecito",
+    "San Carlos - Pareditas",
+    "San Carlos - San Carlos Centro",
+    "San Carlos - Otros",
+    "San Carlos - Sin Coordenadas"
+  ],
+  "Junin": [
+    "Junin - Ciudad",
+    "Junin - Los Barriales",
+    "Junin - Philipps",
+    "Junin - Medrano",
+    "Junin - Algarrobo Grande",
+    "Junin - Otros",
+    "Junin - Sin Coordenadas"
+  ],
+  "Lavalle": [
+    "Lavalle - Villa Tulumaya",
+    "Lavalle - Costa de Araujo",
+    "Lavalle - Jocoli",
+    "Lavalle - Tres de Mayo",
+    "Lavalle - El Paramillo",
+    "Lavalle - Asuncion",
+    "Lavalle - Otros",
+    "Lavalle - Sin Coordenadas"
+  ],
+  "Malargue": [
+    "Malargue - Ciudad",
+    "Malargue - Agua Escondida",
+    "Malargue - Rio Grande",
+    "Malargue - La Junta",
+    "Malargue - Otros",
+    "Malargue - Sin Coordenadas"
+  ],
+  "La Paz": [
+    "La Paz - Ciudad",
+    "La Paz - Desaguadero",
+    "La Paz - Villa Antigua",
+    "La Paz - Las Colonias",
+    "La Paz - Otros",
+    "La Paz - Sin Coordenadas"
+  ]
+}

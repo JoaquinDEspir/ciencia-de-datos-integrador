@@ -9,17 +9,17 @@ import numpy as np
 import pandas as pd
 
 TARGET_COLUMN = "precio_usd"
+GEO_ZONE_COLUMN = "zona_geografica"
 NUMERIC_FEATURES = [
     "superficie_total",
     "superficie_cubierta",
     "banos",
     "dormitorios",
     "cocheras_total",
-    "fotos_cantidad",
     "prp_lat",
     "prp_lng",
 ]
-CATEGORICAL_FEATURES = ["operacion", "tipo_propiedad", "loc_desc"]
+CATEGORICAL_FEATURES = ["operacion", "tipo_propiedad", "loc_desc", GEO_ZONE_COLUMN]
 
 
 @dataclass(frozen=True)
@@ -138,6 +138,7 @@ def train_price_model(dataset: pd.DataFrame) -> ModelArtifacts:
         "operacion": sorted(working["operacion"].dropna().unique().tolist()),
         "tipo_propiedad": sorted(working["tipo_propiedad"].dropna().unique().tolist()),
         "loc_desc": sorted(working["loc_desc"].dropna().unique().tolist()),
+        GEO_ZONE_COLUMN: sorted(working[GEO_ZONE_COLUMN].dropna().unique().tolist()),
     }
     price_summary = {
         "min": float(working[TARGET_COLUMN].min()),

@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
+from app.geography import infer_neighborhood, list_neighborhoods
 try:
     import altair as alt
 except ImportError as exc:  # pragma: no cover - only hits when Altair is missing.
@@ -26,11 +27,45 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "visualizations" / "charts"
 MENDOZA_BOUNDARY_PATH = (
     PROJECT_ROOT / "include" / "data" / "geo" / "mendoza_boundary.geojson"
 )
+NEIGHBORHOODS_PATH = PROJECT_ROOT / "include" / "data" / "reference" / "neighborhoods_by_loc.json"
 
 BOXPLOT_PRICE_DOMAIN = (10_000, 1_000_000)
 MAP_BIN_STEP_DEGREES = 0.01
 MAP_PRICE_DOMAIN = (10_000, 1_000_000)
 MIN_LISTINGS_PER_CELL = 2
+
+
+PRICE_COMPARISON_FIELDS: Dict[str, Dict[str, object]] = {
+    "superficie_total": {
+        "label": "Superficie total (m2)",
+        "scale_type": "log",
+        "axis_format": "~s",
+        "tooltip_format": ",.0f",
+        "positive_only": True,
+    },
+    "superficie_cubierta": {
+        "label": "Superficie cubierta (m2)",
+        "scale_type": "log",
+        "axis_format": "~s",
+        "tooltip_format": ",.0f",
+        "positive_only": True,
+    },
+    "dormitorios": {
+        "label": "Dormitorios",
+        "scale_type": "linear",
+        "axis_format": "d",
+        "tooltip_format": ".0f",
+        "positive_only": False,
+    },
+    "banos": {
+        "label": "Banos",
+        "scale_type": "linear",
+        "axis_format": "d",
+        "tooltip_format": ".0f",
+        "positive_only": False,
+    },
+}
+PRICE_COMPARISON_DEFAULT = "superficie_total"
 
 
 @dataclass(frozen=True)
@@ -40,6 +75,8 @@ class PreparedData:
     full: pd.DataFrame
     with_price_usd: pd.DataFrame
     with_geo: pd.DataFrame
+    barrio_centroids: Dict[str, Tuple[float, float]]
+    neighborhoods_by_loc: Dict[str, List[str]]
 
 
 def _require_altair() -> None:
@@ -133,7 +170,6 @@ def _geometry_contains_point(lon: float, lat: float, geometry: Dict[str, object]
         return False
     return False
 
-
 def load_properties_data(csv_path: Path = DATA_PATH) -> PreparedData:
     """Read and tidy the properties dataset to feed Altair charts."""
     df = pd.read_csv(csv_path, sep=";", decimal=".")
@@ -171,12 +207,71 @@ def load_properties_data(csv_path: Path = DATA_PATH) -> PreparedData:
     df["cocheras_total"] = df[["cocheras", "cochera"]].bfill(axis=1).iloc[:, 0]
     df["cocheras_total"] = df["cocheras_total"].where(df["cocheras_total"] >= 0)
 
+    df["zona_geografica"] = df.apply(
+        lambda row: infer_neighborhood(
+            str(row.get("loc_desc", "")),
+            float(row["prp_lat"]) if pd.notna(row["prp_lat"]) else None,
+            float(row["prp_lng"]) if pd.notna(row["prp_lng"]) else None,
+        ),
+        axis=1,
+    )
+
     with_price_usd = df[df["precio_usd"].notna()].copy()
     with_geo = with_price_usd[
         with_price_usd["prp_lat"].notna() & with_price_usd["prp_lng"].notna()
     ].copy()
 
-    return PreparedData(full=df, with_price_usd=with_price_usd, with_geo=with_geo)
+    centroids_df = (
+        with_geo.groupby("zona_geografica")[["prp_lat", "prp_lng"]]
+        .median()
+        .dropna()
+    )
+    barrio_centroids = {
+        zone: (float(row["prp_lat"]), float(row["prp_lng"]))
+        for zone, row in centroids_df.iterrows()
+    }
+
+    neighborhoods_by_loc: Dict[str, List[str]]
+    if NEIGHBORHOODS_PATH.exists():
+        neighborhoods_by_loc = {
+            str(key).strip().lower(): list(value)
+            for key, value in json.loads(
+                NEIGHBORHOODS_PATH.read_text(encoding="utf-8-sig")
+            ).items()
+        }
+    else:
+        neighborhoods_by_loc = {}
+
+    grouping = (
+        df[df["zona_geografica"].notna()]
+        .groupby("loc_desc")["zona_geografica"]
+        .apply(lambda s: sorted({label for label in s.dropna().unique()}))
+    )
+
+    for loc, labels in grouping.items():
+        loc_str = str(loc).strip()
+        norm_key = loc_str.lower()
+        available = neighborhoods_by_loc.setdefault(norm_key, [])
+        for label in labels:
+            if label not in available:
+                available.append(label)
+
+    for loc in df["loc_desc"].dropna().unique():
+        loc_str = str(loc).strip()
+        norm_key = loc_str.lower()
+        reference = list_neighborhoods(loc_str)
+        existing = neighborhoods_by_loc.setdefault(norm_key, [])
+        for label in reference:
+            if label not in existing:
+                existing.append(label)
+
+    return PreparedData(
+        full=df,
+        with_price_usd=with_price_usd,
+        with_geo=with_geo,
+        barrio_centroids=barrio_centroids,
+        neighborhoods_by_loc=neighborhoods_by_loc,
+    )
 
 
 def price_distribution_chart(data: PreparedData) -> alt.Chart:
@@ -262,15 +357,32 @@ def price_distribution_chart(data: PreparedData) -> alt.Chart:
     return (box + points).properties(width=700, height=400)
 
 
-def price_vs_surface_chart(data: PreparedData) -> alt.Chart:
-    """Scatter plot comparing total surface against USD price."""
+def price_vs_surface_chart(
+    data: PreparedData, metric: str = PRICE_COMPARISON_DEFAULT
+) -> alt.Chart:
+    """Scatter plot comparing USD price against a selectable feature."""
     _require_altair()
+    metric_config = PRICE_COMPARISON_FIELDS.get(metric)
+    if metric_config is None:
+        metric = PRICE_COMPARISON_DEFAULT
+        metric_config = PRICE_COMPARISON_FIELDS[PRICE_COMPARISON_DEFAULT]
+
+    metric_field = metric
+    metric_label = str(metric_config["label"])
+    scale_type = str(metric_config.get("scale_type", "linear"))
+    axis_format = metric_config.get("axis_format")
+    tooltip_format = metric_config.get("tooltip_format", ",.2f")
+    positive_only = bool(metric_config.get("positive_only", False))
+
     df = data.with_price_usd.copy()
-    df = df[df["superficie_total"].notna()]
+    df = df[df[metric_field].notna()]
+    if positive_only:
+        df = df[df[metric_field] > 0]
+    if metric_field in {"dormitorios", "banos"}:
+        df = df[df[metric_field] >= 0]
+        df.loc[:, metric_field] = df[metric_field].clip(upper=10)
     if df.empty:
-        raise ValueError(
-            "No hay registros con superficie total valida para la visualizacion."
-        )
+        raise ValueError(f"No hay datos validos para '{metric_label}'.")
 
     operations = sorted(df["operacion"].dropna().unique().tolist())
     operation_param = _build_operation_param(
@@ -293,10 +405,13 @@ def price_vs_surface_chart(data: PreparedData) -> alt.Chart:
         .mark_circle(stroke="#212121", strokeWidth=0.4, opacity=0.65)
         .encode(
             x=alt.X(
-                "superficie_total:Q",
-                title="Superficie total (m2)",
-                scale=alt.Scale(type="log"),
-                axis=alt.Axis(format="~s", tickCount=6),
+                f"{metric_field}:Q",
+                title=metric_label,
+                scale=alt.Scale(type=scale_type, clamp=scale_type == "log"),
+                axis=alt.Axis(
+                    tickCount=6,
+                    **({"format": axis_format} if axis_format else {}),
+                ),
             ),
             y=alt.Y(
                 "precio_usd:Q",
@@ -319,15 +434,13 @@ def price_vs_surface_chart(data: PreparedData) -> alt.Chart:
                 alt.Tooltip("operacion:N", title="Operacion"),
                 alt.Tooltip("loc_desc:N", title="Localidad"),
                 alt.Tooltip("precio_usd:Q", title="Precio USD", format=",.0f"),
-                alt.Tooltip(
-                    "superficie_total:Q", title="Sup. total (m2)", format=",.0f"
-                ),
+                alt.Tooltip(f"{metric_field}:Q", title=metric_label, format=tooltip_format),
                 alt.Tooltip("dormitorios:Q", title="Dormitorios"),
                 alt.Tooltip("banos:Q", title="Banos"),
             ],
         )
         .properties(
-            title="Relacion entre metros totales y precio listado",
+            title="Relacion entre precio listado y variable seleccionada",
             width=700,
             height=400,
         )
