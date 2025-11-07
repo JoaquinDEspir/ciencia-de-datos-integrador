@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple
 
 import math
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
@@ -23,6 +24,133 @@ from visualizations.altair_charts import (
 )
 DEFAULT_LAT = -32.889
 DEFAULT_LNG = -68.845
+EARTH_RADIUS_KM = 6371.0
+COMPARABLE_DISTANCE_WINDOWS_KM = (0.8, 1.5, 3.0, 6.0)
+SURFACE_TOLERANCES = (0.25, 0.4, 0.6)
+MIN_COMPARABLES = 4
+MAX_COMPARABLES = 12
+
+
+def _geo_distance_km(
+    lat: float, lng: float, latitudes: np.ndarray, longitudes: np.ndarray
+) -> np.ndarray:
+    """Vectorized haversine distance in km."""
+    lat1 = math.radians(lat)
+    lng1 = math.radians(lng)
+    lat2 = np.radians(latitudes)
+    lng2 = np.radians(longitudes)
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlng / 2.0) ** 2
+    return 2.0 * EARTH_RADIUS_KM * np.arcsin(np.minimum(1.0, np.sqrt(a)))
+
+
+def _filter_by_surface_window(df: pd.DataFrame, superficie: float) -> pd.DataFrame:
+    """Restrict candidates to a surface window, relaxing bounds if needed."""
+    if df.empty or superficie is None or superficie <= 0:
+        return df
+    for tolerance in SURFACE_TOLERANCES:
+        lower = max(10.0, superficie * (1 - tolerance))
+        upper = superficie * (1 + tolerance)
+        window = df[df["superficie_total"].between(lower, upper)]
+        if not window.empty:
+            return window
+    return df
+
+
+def find_comparable_properties(
+    prepared: PreparedData,
+    *,
+    lat: float,
+    lng: float,
+    operacion: str,
+    tipo: str,
+    superficie: float,
+    zona: str,
+    localidad: str,
+    max_results: int = MAX_COMPARABLES,
+    min_results: int = MIN_COMPARABLES,
+) -> pd.DataFrame:
+    """Return nearby dataset listings comparable to the user input."""
+    geo_df = prepared.with_geo
+    if geo_df.empty:
+        return pd.DataFrame()
+
+    candidates = geo_df[
+        geo_df["superficie_total"].notna() & (geo_df["superficie_total"] > 0)
+    ].copy()
+    if candidates.empty:
+        return candidates
+
+    if "precio_m2" not in candidates.columns:
+        candidates["precio_m2"] = (
+            candidates[TARGET_COLUMN] / candidates["superficie_total"]
+        )
+        candidates.loc[
+            candidates["superficie_total"] <= 0, "precio_m2"
+        ] = np.nan
+    if "precio_m2_cubierto" not in candidates.columns:
+        candidates["precio_m2_cubierto"] = (
+            candidates[TARGET_COLUMN] / candidates["superficie_cubierta"]
+        )
+        candidates.loc[
+            candidates["superficie_cubierta"] <= 0, "precio_m2_cubierto"
+        ] = np.nan
+
+    base_subset = candidates[
+        (candidates["operacion"] == operacion) & (candidates["tipo_propiedad"] == tipo)
+    ]
+    if base_subset.empty:
+        base_subset = candidates[candidates["operacion"] == operacion]
+    if base_subset.empty:
+        base_subset = candidates
+
+    zone_subset = (
+        base_subset[base_subset[GEO_ZONE_COLUMN] == zona]
+        if zona
+        else pd.DataFrame()
+    )
+    loc_subset = (
+        base_subset[base_subset["loc_desc"] == localidad]
+        if localidad
+        else pd.DataFrame()
+    )
+
+    working = (
+        zone_subset
+        if not zone_subset.empty
+        else loc_subset
+        if not loc_subset.empty
+        else base_subset
+    )
+    working = _filter_by_surface_window(working, superficie)
+    if working.empty:
+        working = _filter_by_surface_window(base_subset, superficie)
+
+    if working.empty:
+        return working
+
+    distances = _geo_distance_km(
+        lat,
+        lng,
+        working["prp_lat"].to_numpy(),
+        working["prp_lng"].to_numpy(),
+    )
+    working = working.assign(distance_km=distances)
+
+    selected = pd.DataFrame()
+    for radius in (*COMPARABLE_DISTANCE_WINDOWS_KM, None):
+        subset = working if radius is None else working[working["distance_km"] <= radius]
+        if subset.empty:
+            continue
+        selected = subset
+        if radius is None or len(subset) >= min_results:
+            break
+
+    if selected.empty:
+        selected = working
+
+    return selected.sort_values("distance_km").head(max_results)
 
 
 @st.cache_data(show_spinner=False)
@@ -313,7 +441,8 @@ def render_prediction_ui(prepared: PreparedData, artifacts: ModelArtifacts) -> N
     col6, col7, col8 = st.columns(3)
     dormitorios = col6.slider("Dormitorios", min_value=0, max_value=10, value=2)
     banos = col7.slider("Banos", min_value=1, max_value=8, value=2)
-    cocheras = col8.slider("Cocheras", min_value=0, max_value=5, value=1)
+    tiene_cochera = col8.checkbox("Tiene cochera", value=True)
+    cocheras = 1 if tiene_cochera else 0
 
     default_lat, default_lng = prepared.barrio_centroids.get(
         barrio, (None, None)
@@ -404,6 +533,66 @@ def render_prediction_ui(prepared: PreparedData, artifacts: ModelArtifacts) -> N
             f"Zona seleccionada: {barrio} (lat {latitud:.4f}, lng {longitud:.4f})"
         )
 
+    comparables_df = find_comparable_properties(
+        prepared,
+        lat=latitud,
+        lng=longitud,
+        operacion=operacion,
+        tipo=tipo,
+        superficie=float(superficie),
+        zona=barrio,
+        localidad=localidad,
+    )
+
+    col_valor_m2, col_valor_m2_cub, col_valor_detalle = st.columns([1, 1, 2])
+    if comparables_df.empty:
+        col_valor_m2.info("Sin referencias cercanas.")
+        col_valor_m2_cub.info("Sin valores cubiertos.")
+        col_valor_detalle.caption(
+            "Ajusta coordenadas, operacion o tipo para ver precios por m2."
+        )
+    else:
+        comparables_len = len(comparables_df)
+        price_series = comparables_df["precio_m2"].dropna()
+        price_series_cub = comparables_df["precio_m2_cubierto"].dropna()
+        detail_parts: List[str] = []
+
+        if not price_series.empty:
+            median_m2 = float(price_series.median())
+            col_valor_m2.metric(
+                "Valor estimado USD/m2",
+                f"{median_m2:,.0f} USD/m2",
+                delta=f"{comparables_len} comparables",
+            )
+            p25 = float(price_series.quantile(0.25))
+            p75 = float(price_series.quantile(0.75))
+            detail_parts.append(f"Total P25 {p25:,.0f} | P75 {p75:,.0f}")
+        else:
+            col_valor_m2.info("Sin valores por m2 en estas referencias.")
+
+        if not price_series_cub.empty:
+            median_m2_cub = float(price_series_cub.median())
+            col_valor_m2_cub.metric(
+                "Valor USD/m2 cubierto",
+                f"{median_m2_cub:,.0f} USD/m2",
+                delta=f"{comparables_len} comparables",
+            )
+            p25_c = float(price_series_cub.quantile(0.25))
+            p75_c = float(price_series_cub.quantile(0.75))
+            detail_parts.append(f"Cubierta P25 {p25_c:,.0f} | P75 {p75_c:,.0f}")
+        else:
+            col_valor_m2_cub.info("Sin datos de sup. cubierta en comparables.")
+
+        median_distance = comparables_df["distance_km"].median()
+        if pd.notna(median_distance):
+            detail_parts.append(f"Radio mediano {float(median_distance):.2f} km")
+        if detail_parts:
+            col_valor_detalle.caption(" | ".join(detail_parts))
+        else:
+            col_valor_detalle.caption(
+                "No hay estadisticas suficientes para resumir los comparables."
+            )
+
     submitted = st.button("Estimar precio", type="primary")
 
     if submitted:
@@ -430,6 +619,51 @@ def render_prediction_ui(prepared: PreparedData, artifacts: ModelArtifacts) -> N
             "Comparacion con la distribucion del dataset: "
             f"mediana {artifacts.price_summary['p50']:,.0f} USD."
         )
+        if comparables_df.empty:
+            st.info("No encontramos propiedades comparables para mostrar en la zona seleccionada.")
+        else:
+            st.subheader("Propiedades comparables cercanas")
+            display_cols = [
+                "operacion",
+                "tipo_propiedad",
+                "loc_desc",
+                GEO_ZONE_COLUMN,
+                "superficie_total",
+                "superficie_cubierta",
+                TARGET_COLUMN,
+                "precio_m2",
+                "precio_m2_cubierto",
+                "distance_km",
+                "dormitorios",
+                "banos",
+                "cocheras_total",
+            ]
+            available_cols = [col for col in display_cols if col in comparables_df.columns]
+            table = (
+                comparables_df[available_cols]
+                .rename(
+                    columns={
+                        GEO_ZONE_COLUMN: "zona_geografica",
+                        TARGET_COLUMN: "precio_usd",
+                    }
+                )
+                .copy()
+            )
+            formatters = {
+                "superficie_total": "{:,.0f}",
+                "superficie_cubierta": "{:,.0f}",
+                "precio_usd": "{:,.0f}",
+                "precio_m2": "{:,.0f}",
+                "precio_m2_cubierto": "{:,.0f}",
+                "distance_km": "{:.2f}",
+                "dormitorios": "{:,.0f}",
+                "banos": "{:,.0f}",
+                "cocheras_total": "{:,.0f}",
+            }
+            st.dataframe(
+                table.style.format({k: v for k, v in formatters.items() if k in table.columns}),
+                use_container_width=True,
+            )
 
 def main() -> None:
     st.set_page_config(

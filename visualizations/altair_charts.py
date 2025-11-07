@@ -203,6 +203,10 @@ def load_properties_data(csv_path: Path = DATA_PATH) -> PreparedData:
     df["precio_ars"] = df["prp_pre"].where(df["prp_pre"] > 0)
     df["superficie_total"] = df["sup_total"].where(df["sup_total"] > 0)
     df["superficie_cubierta"] = df["sup_cubierta"].where(df["sup_cubierta"] > 0)
+    df["precio_m2"] = df["precio_usd"] / df["superficie_total"]
+    df.loc[df["superficie_total"] <= 0, "precio_m2"] = np.nan
+    df["precio_m2_cubierto"] = df["precio_usd"] / df["superficie_cubierta"]
+    df.loc[df["superficie_cubierta"] <= 0, "precio_m2_cubierto"] = np.nan
 
     df["cocheras_total"] = df[["cocheras", "cochera"]].bfill(axis=1).iloc[:, 0]
     df["cocheras_total"] = df["cocheras_total"].where(df["cocheras_total"] >= 0)
