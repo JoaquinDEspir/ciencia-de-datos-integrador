@@ -9,7 +9,14 @@ import math
 import numpy as np
 import pandas as pd
 import streamlit as st
-from streamlit_folium import st_folium
+
+try:
+    from streamlit_folium import st_folium
+except ImportError as exc:  # pragma: no cover - optional dependency guard
+    st_folium = None  # type: ignore[assignment]
+    _ST_FOLIUM_IMPORT_ERROR = exc
+else:
+    _ST_FOLIUM_IMPORT_ERROR = None
 
 from app.model import GEO_ZONE_COLUMN, ModelArtifacts, TARGET_COLUMN, train_price_model
 from app.geography import infer_neighborhood, list_neighborhoods
@@ -29,6 +36,21 @@ COMPARABLE_DISTANCE_WINDOWS_KM = (0.8, 1.5, 3.0, 6.0)
 SURFACE_TOLERANCES = (0.25, 0.4, 0.6)
 MIN_COMPARABLES = 4
 MAX_COMPARABLES = 12
+
+
+def _ensure_streamlit_folium() -> bool:
+    """Check if streamlit-folium is available and inform the user otherwise."""
+    if st_folium is not None:
+        return True
+    message = (
+        "La funcionalidad de mapa requiere instalar `streamlit-folium`. "
+        "Asegurate de ejecutar `pip install -r requirements.txt` y "
+        "redeployar la app."
+    )
+    st.error(message)
+    if _ST_FOLIUM_IMPORT_ERROR:
+        st.caption(f"Detalle: {_ST_FOLIUM_IMPORT_ERROR}")
+    return False
 
 
 def _geo_distance_km(
@@ -188,6 +210,8 @@ def build_filtered_data(
 
 
 def render_price_density_map(filtered: PreparedData) -> None:
+    if not _ensure_streamlit_folium():
+        return
     from branca.colormap import LinearColormap
     import folium
 
@@ -464,38 +488,42 @@ def render_prediction_ui(prepared: PreparedData, artifacts: ModelArtifacts) -> N
         st.session_state[show_map_key] = True
 
     if st.session_state.get(show_map_key):
-        import folium
+        if not _ensure_streamlit_folium():
+            st.session_state[show_map_key] = False
+            st.info("No se puede mostrar el mapa sin `streamlit-folium` instalado.")
+        else:
+            import folium
 
-        map_container = st.container()
-        with map_container:
-            st.markdown("Haz click en el mapa para fijar la ubicacion.")
-            map_obj = folium.Map(
-                location=[
-                    st.session_state[coord_key]["lat"],
-                    st.session_state[coord_key]["lng"],
-                ],
-                zoom_start=14,
-                control_scale=True,
-            )
-            folium.Marker(
-                [
-                    st.session_state[coord_key]["lat"],
-                    st.session_state[coord_key]["lng"],
-                ],
-                tooltip="Posicion seleccionada",
-            ).add_to(map_obj)
-            map_obj.add_child(folium.LatLngPopup())
-            map_data = st_folium(
-                map_obj,
-                height=360,
-                width=None,
-                key=f"map_{loc_norm}_{barrio}",
-            )
-            if map_data and map_data.get("last_clicked"):
-                st.session_state[coord_key]["lat"] = map_data["last_clicked"]["lat"]
-                st.session_state[coord_key]["lng"] = map_data["last_clicked"]["lng"]
-                st.session_state[lat_input_key] = st.session_state[coord_key]["lat"]
-                st.session_state[lng_input_key] = st.session_state[coord_key]["lng"]
+            map_container = st.container()
+            with map_container:
+                st.markdown("Haz click en el mapa para fijar la ubicacion.")
+                map_obj = folium.Map(
+                    location=[
+                        st.session_state[coord_key]["lat"],
+                        st.session_state[coord_key]["lng"],
+                    ],
+                    zoom_start=14,
+                    control_scale=True,
+                )
+                folium.Marker(
+                    [
+                        st.session_state[coord_key]["lat"],
+                        st.session_state[coord_key]["lng"],
+                    ],
+                    tooltip="Posicion seleccionada",
+                ).add_to(map_obj)
+                map_obj.add_child(folium.LatLngPopup())
+                map_data = st_folium(
+                    map_obj,
+                    height=360,
+                    width=None,
+                    key=f"map_{loc_norm}_{barrio}",
+                )
+                if map_data and map_data.get("last_clicked"):
+                    st.session_state[coord_key]["lat"] = map_data["last_clicked"]["lat"]
+                    st.session_state[coord_key]["lng"] = map_data["last_clicked"]["lng"]
+                    st.session_state[lat_input_key] = st.session_state[coord_key]["lat"]
+                    st.session_state[lng_input_key] = st.session_state[coord_key]["lng"]
 
             if st.button("Cerrar mapa", key=f"close_map_{loc_norm}_{barrio}"):
                 st.session_state[show_map_key] = False
