@@ -643,6 +643,9 @@ def render_prediction_ui(prepared: PreparedData, artifacts: ModelArtifacts) -> N
         )
         prediction = artifacts.model.predict(input_df)[0]
         st.metric("Precio estimado (USD)", f"{prediction:,.0f}")
+        notes = getattr(artifacts.model, "last_prediction_notes", [])
+        for note in notes:
+            st.warning(note)
         st.write(
             "Comparacion con la distribucion del dataset: "
             f"mediana {artifacts.price_summary['p50']:,.0f} USD."
