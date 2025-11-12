@@ -29,6 +29,7 @@ PRICE_CAP_USD = 500_000.0
 RANDOM_STATE = 42
 MIN_TYPE_SAMPLES = 10
 MIN_SPLIT_SAMPLES = 10
+MAX_DORM_ROLLOUT = 10
 
 NUMERIC_BASE_FEATURES = [
     "superficie_total",
@@ -234,8 +235,28 @@ class RidgeMonotonicPriceModel:
             return {}
         tmp["ratio"] = tmp["y"] / tmp["pred"]
         g = tmp.groupby("dorm")["ratio"].median().fillna(1)
-        uplift = np.clip(np.maximum.accumulate(g.values), 1.0, uplift_cap)
-        return dict(zip(g.index.astype(int), uplift))
+        dorms = g.index.astype(int).to_numpy()
+        ratios = np.clip(np.maximum.accumulate(g.values), 1.0, uplift_cap)
+        uplift = {0: 1.0}
+        last_value = uplift[0]
+        last_dorm = 0
+        for dorm, ratio in zip(dorms, ratios):
+            if dorm <= last_dorm:
+                dorm = last_dorm + 1
+            step_gap = max(dorm - last_dorm, 1)
+            min_allowed = last_value * (min_step ** step_gap)
+            value = max(min_allowed, ratio)
+            value = min(value, uplift_cap)
+            uplift[dorm] = value
+            last_value = value
+            last_dorm = dorm
+        for dorm in range(last_dorm + 1, MAX_DORM_ROLLOUT + 1):
+            step_gap = dorm - last_dorm
+            value = min(last_value * (min_step ** step_gap), uplift_cap)
+            uplift[dorm] = value
+            last_value = value
+            last_dorm = dorm
+        return uplift
 
     def _lookup_uplift(self, dorms):
         if not hasattr(self, "uplift_by_bedroom_"):
