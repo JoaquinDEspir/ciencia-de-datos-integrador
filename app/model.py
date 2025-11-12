@@ -377,7 +377,8 @@ def train_price_model(dataset: pd.DataFrame) -> ModelArtifacts:
         y_true = test_df[TARGET_COLUMN].values
         y_pred = wrapper.predict(test_df)
         mae = mean_absolute_error(y_true, y_pred)
-        rmse = mean_squared_error(y_true, y_pred, squared=False)
+        mse = mean_squared_error(y_true, y_pred)
+        rmse = float(np.sqrt(mse))
         r2 = r2_score(y_true, y_pred)
     else:
         mae = rmse = r2 = float("nan")
